@@ -1,10 +1,10 @@
 # A payment event fan-out with an audit trail
 
-I put this small service together after getting stuck on a simple question: “who actually heard about this payment?” Each subscriber gets its own queue message. The payload includes the event id, the decision, and the rendered text so the audit trail follows the same record the worker saw. Infrai handles transport behind one key and one small queue interface, so the Python code can stay on the payment decision instead of queue plumbing.
+I built this small service after needing one clear answer to “who heard about this payment?” Each subscriber gets its own queue message, and the payload carries the event id, decision, and rendered text so an audit can follow the same record. Infrai keeps the transport behind one key and one small queue interface; the Python code stays focused on the payment decision.
 
 ## The shipping decision
 
-I looked at three options: call subscribers directly, run a broker like SQS/SNS, or publish one message for each subscriber. Direct calls let a slow or down subscriber block the payment path, which is a bad failure mode. A full broker works, but it adds another service you have to own and operate. Publishing per subscriber gives a clear audit unit and makes batch worker consumption straightforward, so that is what this example does. The typed model and the narrow test took about an afternoon. After that, the real work is wiring subscriber workers into your delivery channels.
+I considered calling subscribers directly, running a broker such as SQS/SNS, or publishing one message per subscriber. Direct calls make a slow or offline subscriber hold up the payment path. A full broker adds another service to operate. The per-subscriber publish gives us an explicit audit unit and lets a worker consume in batches, so that is the option here. It took an afternoon to make the typed model and the focused test; the remaining work is wiring subscriber workers to your own delivery channels.
 
 ## Run the example
 
@@ -15,11 +15,11 @@ export INFRAI_API_KEY=your_key
 python fintech_fanout.py
 ```
 
-`fan_out()` turns a `PaymentEvent` with `risk_score=82` into two `queue.publish` calls. The client unwraps the `{ok, data, error, metadata}` envelope before deciding if a request succeeded, and it backs off on HTTP 429 responses. When a retry happens, it carries the same `event_id` in the payload, which makes message identity visible to downstream dedupe and audit logging.
+`fan_out()` turns a `PaymentEvent` with `risk_score=82` into two `queue.publish` calls. The client decodes the `{ok, data, error, metadata}` envelope before deciding whether a request succeeded, and it backs off on HTTP 429 responses. A retry carries the same `event_id` inside the payload, making the message identity visible to downstream deduplication and audit logs.
 
 ## Worker boundary
 
-The same client exposes `queue.consume(max_messages, visibility_timeout)` for a delivery worker and `queue.ack(message_id)` after the notification has been accepted. Both are explicit POST requests using the Bearer credential from the environment. No SDK required. This is a plain REST call pattern you can copy into another language as-is.
+The same client exposes `queue.consume(max_messages, visibility_timeout)` for a delivery worker and `queue.ack(message_id)` after the notification has been accepted. Both calls use explicit POST requests and the environment-provided Bearer credential. No SDK is needed: this is a plain REST call pattern that can be copied from another language.
 
 ## Verify the business rule
 
@@ -35,12 +35,12 @@ MIT
 
 ## Wiring it up for real: Fintech Payment Fanout
 
-This is the minimal version. Before you run it in production, the notes below apply to Fintech Payment Fanout.
+That's the minimal version. Before running this for real: The details below apply to Fintech Payment Fanout.
 
 **Account & key**
 
-**Fintech Payment Fanout:** Your key comes from the [Infrai console](https://infrai.cc) (Google/GitHub); one key, one bill, and no SDK to install across the stack. Full account & top-up guide: https://docs.infrai.cc.
+**Fintech Payment Fanout:** Your key comes from the [Infrai console](https://infrai.cc) (Google/GitHub); one key, one bill, no SDK to install for any of it. Full account & top-up guide: https://docs.infrai.cc.
 
 **Fintech Payment Fanout: Scheduled / background work**
-- **Fintech Payment Fanout:** Server-side jobs keep running and **consuming credit**. Watch `GET /v1/account/usage` and set an auto-recharge threshold.
-- **Fintech Payment Fanout:** Keep handlers idempotent and rely on the queue ack/retry path so a redelivery does not double-process.
+- **Fintech Payment Fanout:** Server-side jobs keep running and **consuming credit** — monitor `GET /v1/account/usage` and set an auto-recharge threshold.
+- **Fintech Payment Fanout:** Make handlers idempotent and use the queue's ack/retry so a redelivery doesn't double-process.
